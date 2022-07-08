@@ -1,0 +1,17 @@
+[package]
+name = "green-lib"
+version = "0.1.0"
+edition = "2021"
+authors = ["urlordjames <32751441+urlordjames@users.noreply.github.com>"]
+license = "MIT"
+
+[dependencies]
+serde = { version = "1.0", features = [ "derive" ] }
+serde_json = "1.0"
+tokio = "1.19"
+sha2 = "0.10"
+
+[dependencies.reqwest]
+version = "0.11"
+default-features = false
+features = [ "rustls-tls" ]
