@@ -2,6 +2,8 @@ use serde::{Serialize, Deserialize};
 use sha2::{Sha256, Digest};
 use std::io::Write;
 
+pub mod util;
+
 struct UpgradeState {
 	top_level: bool,
 	handles: Vec<tokio::task::JoinHandle<()>>
