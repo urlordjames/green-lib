@@ -7,15 +7,14 @@ struct UpgradeState {
 	handles: Vec<tokio::task::JoinHandle<()>>
 }
 
+/// contains information about a remote directory, created from a manifest that can be fetched with [Directory::from_url]
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Directory {
-	name: String,
-	files: Vec<File>,
-	children: Vec<Directory>
+	pub name: String,
+	pub files: Vec<File>,
+	pub children: Vec<Directory>
 }
 
-/// # Description
-/// contains information about a remote directory, created from a manifest that can be fetched with [from_url](Self::from_url)
 impl Directory {
 	/// # Description
 	/// fetches a manifest from a URL
@@ -132,9 +131,10 @@ impl Directory {
 	}
 }
 
+/// contains information about a remote file, part of a [Directory]
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash)]
-struct File {
-	name: String,
-	sha: String,
-	url: String
+pub struct File {
+	pub name: String,
+	pub sha: String,
+	pub url: String
 }
