@@ -7,8 +7,7 @@ pub fn minecraft_path() -> std::path::PathBuf {
 		let appdata_path = std::path::Path::new(&appdata);
 		appdata_path.join(".minecraft")
 	} else if cfg!(target_os = "macos") {
-		//std::path::Path::new("~/Library/Application Support/minecraft").to_path_buf()
-		todo!("macos implementation");
+		std::path::Path::new("~/Library/Application Support/minecraft").to_path_buf()
 	} else {
 		let home = std::env::var("HOME").unwrap();
 		let home_path = std::path::Path::new(&home);
