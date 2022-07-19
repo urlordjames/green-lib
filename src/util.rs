@@ -1,6 +1,6 @@
-/// gets the default minecraft path
+/// Gets the default minecraft path.
 /// # Warning
-/// no implementation for macos yet
+/// MacOS implementation is currently broken.
 pub fn minecraft_path() -> std::path::PathBuf {
 	if cfg!(target_os = "windows") {
 		let appdata = std::env::var("APPDATA").unwrap();

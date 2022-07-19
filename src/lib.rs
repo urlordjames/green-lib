@@ -9,7 +9,7 @@ struct UpgradeState {
 	handles: Vec<tokio::task::JoinHandle<()>>
 }
 
-/// contains information about a remote directory, created from a manifest that can be fetched with [Directory::from_url]
+/// Contains information about a remote directory, created from a manifest that can be fetched with [Directory::from_url].
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Directory {
 	pub name: String,
@@ -19,32 +19,37 @@ pub struct Directory {
 
 impl Directory {
 	/// # Description
-	/// fetches a manifest from a URL
+	/// Fetches a manifest from a URL.
 	/// # Warning
-	/// this function will trust any URL you stick into it, ideally make sure only trusted URLs are passed in, or at least ensure all URLs use encrypted protocols like HTTPS
+	/// This function will trust any URL you stick into it, ideally make sure only trusted URLs are passed in, or at least ensure all URLs use encrypted protocols like HTTPS.
 	pub async fn from_url<U: reqwest::IntoUrl>(url: U) -> Option<Self> {
 		let resp = reqwest::get(url).await.ok()?.text().await.ok()?;
 		serde_json::from_str(&resp).ok()
 	}
 
 	/// # Description
-	/// updates a path to match the state of this Directory
+	/// Updates a path to match the state of this instance.
+	/// The first function in the callbacks tuple is called with the total number of files to download, the second is called upon finishing each download.
 	/// # Warning
-	/// it's up to you to get the minecraft folder right, this function deletes stuff so make sure to add some checks so users can't footgun themselves
-	pub async fn upgrade_game_folder(&self, path: &std::path::Path) {
+	/// It's up to you to get the minecraft folder right, this function deletes stuff so make sure to add some checks so users can't footgun themselves.
+	pub async fn upgrade_game_folder<C1: Fn(usize) + Copy, C2: 'static + Fn() + Send + Copy + Sync>(&self, path: &std::path::Path, callbacks: Option<(C1, C2)>) {
 		let mut upgrade_state = UpgradeState {
 			top_level: true,
 			handles: vec![]
 		};
 
-		self.upgrade_folder_to(path, &mut upgrade_state);
+		self.upgrade_folder_to(path, &mut upgrade_state, callbacks.map(|c| c.1));
+		match callbacks.map(|c| c.0) {
+			Some(total_callback) => total_callback(upgrade_state.handles.len()),
+			None => ()
+		};
 
 		for handle in upgrade_state.handles.iter_mut() {
 			handle.await.unwrap();
 		}
 	}
 
-	fn upgrade_folder_to(&self, path: &std::path::Path, state: &mut UpgradeState) {
+	fn upgrade_folder_to<C: 'static + Fn() + Send + Copy + Sync>(&self, path: &std::path::Path, state: &mut UpgradeState, callback: Option<C>) {
 		let mut fetch_set = std::collections::HashSet::new();
 		for remote_file in &self.files {
 			fetch_set.insert(remote_file);
@@ -114,6 +119,10 @@ impl Directory {
 					}
 
 					local_file.write_all(&contents).unwrap();
+					match callback {
+						Some(callback) => callback(),
+						None => ()
+					};
 					break;
 				}
 			});
@@ -134,12 +143,12 @@ impl Directory {
 				_ => ()
 			}
 
-			child.upgrade_folder_to(local_path, state);
+			child.upgrade_folder_to(local_path, state, callback);
 		}
 	}
 }
 
-/// contains information about a remote file, part of a [Directory]
+/// Contains information about a remote file, part of a [Directory].
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash)]
 pub struct File {
 	pub name: String,
