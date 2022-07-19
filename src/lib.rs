@@ -60,7 +60,7 @@ impl Directory {
 							remote_child.name == local_file.file_name().to_string_lossy()
 						}) {
 							Some(_) => {
-								// do nothing, file already exists
+								// do nothing, local folder already exists
 							},
 							None => {
 								std::fs::remove_dir_all(local_file.path()).unwrap();
@@ -92,9 +92,9 @@ impl Directory {
 			let local_path = &path.join(&to_fetch.name);
 			let mut local_file = std::fs::File::create(local_path).unwrap();
 			let url = to_fetch.url.clone();
+			let sha = to_fetch.sha.clone();
 
 			let fetch_handle = tokio::spawn(async move {
-				let url = url;
 				loop {
 					let contents = match reqwest::get(&url).await {
 						Ok(contents) => contents,
@@ -107,6 +107,12 @@ impl Directory {
 							}
 						}
 					}.bytes().await.unwrap();
+
+					let downloaded_sha = format!("{:x}", Sha256::digest(&contents));
+					if downloaded_sha != sha {
+						panic!("sha256 for {} didn't check out\nexpected {}\nfound {}", url, sha, downloaded_sha);
+					}
+
 					local_file.write_all(&contents).unwrap();
 					break;
 				}
