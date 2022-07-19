@@ -32,24 +32,21 @@ impl Directory {
 	/// The first function in the callbacks tuple is called with the total number of files to download, the second is called upon finishing each download.
 	/// # Warning
 	/// It's up to you to get the minecraft folder right, this function deletes stuff so make sure to add some checks so users can't footgun themselves.
-	pub async fn upgrade_game_folder<C1: FnOnce(usize), C2: 'static + Fn() + Send + Copy + Sync>(&self, path: &std::path::Path, callbacks: Option<(C1, C2)>) {
+	pub async fn upgrade_game_folder<C1: FnOnce(usize), C2: 'static + Fn() + Send + Copy + Sync>(&self, path: &std::path::Path, total_callback: C1, download_callback: C2) {
 		let mut upgrade_state = UpgradeState {
 			top_level: true,
 			handles: vec![]
 		};
 
-		self.upgrade_folder_to(path, &mut upgrade_state, callbacks.as_ref().map(|c| c.1));
-		match callbacks.map(|c| c.0) {
-			Some(total_callback) => total_callback(upgrade_state.handles.len()),
-			None => ()
-		};
+		self.upgrade_folder_to(path, &mut upgrade_state, download_callback);
+		total_callback(upgrade_state.handles.len());
 
 		for handle in upgrade_state.handles.iter_mut() {
 			handle.await.unwrap();
 		}
 	}
 
-	fn upgrade_folder_to<C: 'static + Fn() + Send + Copy + Sync>(&self, path: &std::path::Path, state: &mut UpgradeState, callback: Option<C>) {
+	fn upgrade_folder_to<C: 'static + Fn() + Send + Copy + Sync>(&self, path: &std::path::Path, state: &mut UpgradeState, download_callback: C) {
 		let mut fetch_set = std::collections::HashSet::new();
 		for remote_file in &self.files {
 			fetch_set.insert(remote_file);
@@ -119,10 +116,7 @@ impl Directory {
 					}
 
 					local_file.write_all(&contents).unwrap();
-					match callback {
-						Some(callback) => callback(),
-						None => ()
-					};
+					download_callback();
 					break;
 				}
 			});
@@ -143,7 +137,7 @@ impl Directory {
 				_ => ()
 			}
 
-			child.upgrade_folder_to(local_path, state, callback);
+			child.upgrade_folder_to(local_path, state, download_callback);
 		}
 	}
 }
