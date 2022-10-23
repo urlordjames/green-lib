@@ -1,12 +1,14 @@
 use serde::{Serialize, Deserialize};
 use sha2::{Sha256, Digest};
+use tokio::task::JoinHandle;
+use tokio::sync::mpsc;
 use std::io::Write;
 
 pub mod util;
 
 struct UpgradeState {
 	top_level: bool,
-	handles: Vec<tokio::task::JoinHandle<()>>
+	handles: Vec<JoinHandle<()>>
 }
 
 /// Contains information about a remote directory, created from a manifest that can be fetched with [Directory::from_url].
@@ -15,6 +17,13 @@ pub struct Directory {
 	pub name: String,
 	pub files: Vec<File>,
 	pub children: Vec<Directory>
+}
+
+/// A message that will give information about the status of an upgrade, note that you may recieve these events in any order (including [UpgradeStatus::Tick] before [UpgradeStatus::Length])
+#[derive(Debug)]
+pub enum UpgradeStatus {
+	Length(usize),
+	Tick
 }
 
 impl Directory {
@@ -29,24 +38,28 @@ impl Directory {
 
 	/// # Description
 	/// Updates a path to match the state of this instance.
-	/// The first function in the callbacks tuple is called with the total number of files to download, the second is called upon finishing each download.
+	/// Returns a reciever that can be used for showing the user a vague indication of status, and a handle that will resolve when the upgrade is done
 	/// # Warning
 	/// It's up to you to get the minecraft folder right, this function deletes stuff so make sure to add some checks so users can't footgun themselves.
-	pub async fn upgrade_game_folder<C1: FnOnce(usize), C2: 'static + Fn() + Send + Copy + Sync>(&self, path: &std::path::Path, total_callback: C1, download_callback: C2) {
+	/// You should await the handle, the reciever is only a rough indication of progress
+	pub async fn upgrade_game_folder(&self, path: &std::path::Path) -> (mpsc::Receiver<UpgradeStatus>, JoinHandle<()>) {
 		let mut upgrade_state = UpgradeState {
 			top_level: true,
 			handles: vec![]
 		};
 
-		self.upgrade_folder_to(path, &mut upgrade_state, download_callback);
-		total_callback(upgrade_state.handles.len());
+		let (tx, rx) = mpsc::channel(128);
+		self.upgrade_folder_to(path, &mut upgrade_state, tx.clone());
+		tx.send(UpgradeStatus::Length(upgrade_state.handles.len())).await.unwrap();
 
-		for handle in upgrade_state.handles.iter_mut() {
-			handle.await.unwrap();
-		}
+		return (rx, tokio::spawn(async move {
+			for handle in upgrade_state.handles.iter_mut() {
+				handle.await.unwrap();
+			}
+		}));
 	}
 
-	fn upgrade_folder_to<C: 'static + Fn() + Send + Copy + Sync>(&self, path: &std::path::Path, state: &mut UpgradeState, download_callback: C) {
+	fn upgrade_folder_to(&self, path: &std::path::Path, state: &mut UpgradeState, tx: mpsc::Sender<UpgradeStatus>) {
 		let mut fetch_set = std::collections::HashSet::new();
 		for remote_file in &self.files {
 			fetch_set.insert(remote_file);
@@ -96,6 +109,8 @@ impl Directory {
 			let url = to_fetch.url.clone();
 			let sha = to_fetch.sha.clone();
 
+			let tx = tx.clone();
+
 			let fetch_handle = tokio::spawn(async move {
 				loop {
 					let contents = match reqwest::get(&url).await {
@@ -116,7 +131,7 @@ impl Directory {
 					}
 
 					local_file.write_all(&contents).unwrap();
-					download_callback();
+					tx.send(UpgradeStatus::Tick).await.unwrap();
 					break;
 				}
 			});
@@ -137,7 +152,7 @@ impl Directory {
 				_ => ()
 			}
 
-			child.upgrade_folder_to(local_path, state, download_callback);
+			child.upgrade_folder_to(local_path, state, tx.clone());
 		}
 	}
 }
