@@ -2,7 +2,7 @@ use serde::{Serialize, Deserialize};
 use sha2::{Sha256, Digest};
 use tokio::task::JoinHandle;
 use tokio::sync::mpsc;
-use std::io::Write;
+use tokio::io::AsyncWriteExt;
 
 pub mod util;
 
@@ -55,7 +55,7 @@ impl Directory {
 			handles: vec![]
 		};
 
-		self.upgrade_folder_to(path, &mut upgrade_state, tx.clone());
+		self.upgrade_folder_to(path, &mut upgrade_state, tx.clone()).await;
 		send!(tx, UpgradeStatus::Length(upgrade_state.handles.len()));
 
 		for handle in upgrade_state.handles.iter_mut() {
@@ -63,17 +63,18 @@ impl Directory {
 		}
 	}
 
-	fn upgrade_folder_to(&self, path: &std::path::Path, state: &mut UpgradeState, tx: Option<mpsc::Sender<UpgradeStatus>>) {
+	#[async_recursion::async_recursion]
+	async fn upgrade_folder_to(&self, path: &std::path::Path, state: &mut UpgradeState, tx: Option<mpsc::Sender<UpgradeStatus>>) {
 		let mut fetch_set = std::collections::HashSet::new();
 		for remote_file in &self.files {
 			fetch_set.insert(remote_file);
 		}
-		let files = std::fs::read_dir(path).expect("cannot open path");
+		let mut files = tokio::fs::read_dir(path).await.expect("cannot open path");
 
 		match state.top_level {
 			false => {
-				for local_file in files.filter_map(|x| x.ok()) {
-					let local_file_type = local_file.file_type().unwrap();
+				while let Ok(Some(local_file)) = files.next_entry().await {
+					let local_file_type = local_file.file_type().await.unwrap();
 					if local_file_type.is_dir() {
 						match self.children.iter().find(|remote_child| {
 							remote_child.name == local_file.file_name().to_string_lossy()
@@ -82,11 +83,11 @@ impl Directory {
 								// do nothing, local folder already exists
 							},
 							None => {
-								std::fs::remove_dir_all(local_file.path()).unwrap();
+								tokio::fs::remove_dir_all(local_file.path()).await.unwrap();
 							}
 						}
 					} else if local_file_type.is_file() {
-						let local_contents = std::fs::read(local_file.path()).unwrap();
+						let local_contents = tokio::fs::read(local_file.path()).await.unwrap();
 						let local_sha = Sha256::digest(local_contents);
 						match self.files.iter().find(|remote_file| {
 							remote_file.sha == format!("{:x}", local_sha) &&
@@ -96,7 +97,7 @@ impl Directory {
 								fetch_set.remove(remote_file);
 							},
 							None => {
-								std::fs::remove_file(local_file.path()).unwrap();
+								tokio::fs::remove_file(local_file.path()).await.unwrap();
 							}
 						}
 					}
@@ -109,7 +110,7 @@ impl Directory {
 
 		for to_fetch in fetch_set.drain() {
 			let local_path = &path.join(&to_fetch.name);
-			let mut local_file = std::fs::File::create(local_path).unwrap();
+			let mut local_file = tokio::fs::File::create(local_path).await.unwrap();
 			let url = to_fetch.url.clone();
 			let sha = to_fetch.sha.clone();
 
@@ -134,7 +135,7 @@ impl Directory {
 						panic!("sha256 for {} didn't check out\nexpected {}\nfound {}", url, sha, downloaded_sha);
 					}
 
-					local_file.write_all(&contents).unwrap();
+					local_file.write_all(&contents).await.unwrap();
 					send!(tx, UpgradeStatus::Tick);
 					break;
 				}
@@ -146,13 +147,13 @@ impl Directory {
 		for child in &self.children {
 			let local_path = &path.join(&child.name);
 
-			if let Err(error) = std::fs::create_dir(local_path) {
+			if let Err(error) = tokio::fs::create_dir(local_path).await {
 				if error.kind() != std::io::ErrorKind::AlreadyExists {
 					panic!("cannot create folder {:?} because {}", local_path, error);
 				}
 			}
 
-			child.upgrade_folder_to(local_path, state, tx.clone());
+			child.upgrade_folder_to(local_path, state, tx.clone()).await;
 		}
 	}
 }
