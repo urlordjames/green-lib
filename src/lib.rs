@@ -146,14 +146,10 @@ impl Directory {
 		for child in &self.children {
 			let local_path = &path.join(&child.name);
 
-			match std::fs::create_dir(local_path) {
-				Err(error) => match error.kind() {
-					std::io::ErrorKind::AlreadyExists => (),
-					_ => {
-						panic!("cannot create folder {:?} because {}", local_path, error);
-					}
-				},
-				_ => ()
+			if let Err(error) = std::fs::create_dir(local_path) {
+				if error.kind() != std::io::ErrorKind::AlreadyExists {
+					panic!("cannot create folder {:?} because {}", local_path, error);
+				}
 			}
 
 			child.upgrade_folder_to(local_path, state, tx.clone());
