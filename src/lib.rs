@@ -26,6 +26,14 @@ pub enum UpgradeStatus {
 	Tick
 }
 
+macro_rules! send {
+	($tx:expr, $val:expr) => {
+		if let Some(ref tx) = $tx {
+			tx.send($val).await.unwrap()
+		}
+	}
+}
+
 impl Directory {
 	/// # Description
 	/// Fetches a manifest from a URL.
@@ -38,28 +46,24 @@ impl Directory {
 
 	/// # Description
 	/// Updates a path to match the state of this instance.
-	/// Returns a reciever that can be used for showing the user a vague indication of status, and a handle that will resolve when the upgrade is done
+	/// The sender recieves a vague indication of status through the [UpgradeStatus] enum.
 	/// # Warning
 	/// It's up to you to get the minecraft folder right, this function deletes stuff so make sure to add some checks so users can't footgun themselves.
-	/// You should await the handle, the reciever is only a rough indication of progress
-	pub async fn upgrade_game_folder(&self, path: &std::path::Path) -> (mpsc::Receiver<UpgradeStatus>, JoinHandle<()>) {
+	pub async fn upgrade_game_folder(&self, path: &std::path::Path, tx: Option<mpsc::Sender<UpgradeStatus>>) {
 		let mut upgrade_state = UpgradeState {
 			top_level: true,
 			handles: vec![]
 		};
 
-		let (tx, rx) = mpsc::channel(128);
 		self.upgrade_folder_to(path, &mut upgrade_state, tx.clone());
-		tx.send(UpgradeStatus::Length(upgrade_state.handles.len())).await.unwrap();
+		send!(tx, UpgradeStatus::Length(upgrade_state.handles.len()));
 
-		return (rx, tokio::spawn(async move {
-			for handle in upgrade_state.handles.iter_mut() {
-				handle.await.unwrap();
-			}
-		}));
+		for handle in upgrade_state.handles.iter_mut() {
+			handle.await.unwrap();
+		}
 	}
 
-	fn upgrade_folder_to(&self, path: &std::path::Path, state: &mut UpgradeState, tx: mpsc::Sender<UpgradeStatus>) {
+	fn upgrade_folder_to(&self, path: &std::path::Path, state: &mut UpgradeState, tx: Option<mpsc::Sender<UpgradeStatus>>) {
 		let mut fetch_set = std::collections::HashSet::new();
 		for remote_file in &self.files {
 			fetch_set.insert(remote_file);
@@ -131,7 +135,7 @@ impl Directory {
 					}
 
 					local_file.write_all(&contents).unwrap();
-					tx.send(UpgradeStatus::Tick).await.unwrap();
+					send!(tx, UpgradeStatus::Tick);
 					break;
 				}
 			});
