@@ -12,7 +12,7 @@ struct UpgradeState {
 }
 
 /// Contains information about a remote directory, created from a manifest that can be fetched with [Directory::from_url].
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Directory {
 	pub name: String,
 	pub files: Vec<File>,
@@ -159,7 +159,7 @@ impl Directory {
 }
 
 /// Contains information about a remote file, part of a [Directory].
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash, Clone)]
 pub struct File {
 	pub name: String,
 	pub sha: String,
