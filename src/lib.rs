@@ -66,7 +66,7 @@ impl Directory {
 
 	#[async_recursion::async_recursion]
 	async fn upgrade_folder_to(&self, path: &std::path::Path, state: &mut UpgradeState, tx: Option<mpsc::Sender<UpgradeStatus>>) {
-		let mut fetch_set = HashMap::<String, File>::new();
+		let mut fetch_set = self.files.clone();
 		let mut files = tokio::fs::read_dir(path).await.expect("cannot open path");
 
 		if state.top_level {
