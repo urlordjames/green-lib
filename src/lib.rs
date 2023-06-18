@@ -3,6 +3,8 @@ use sha2::{Sha256, Digest};
 use tokio::task::JoinHandle;
 use tokio::sync::mpsc;
 use tokio::io::AsyncWriteExt;
+use std::sync::Arc;
+use std::collections::HashMap;
 
 pub mod util;
 
@@ -14,9 +16,8 @@ struct UpgradeState {
 /// Contains information about a remote directory, created from a manifest that can be fetched with [Directory::from_url].
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Directory {
-	pub name: String,
-	pub files: Vec<File>,
-	pub children: Vec<Directory>
+	pub files: HashMap<String, File>,
+	pub children: HashMap<String, Directory>
 }
 
 /// A message that will give information about the status of an upgrade, note that you may recieve these events in any order (including [UpgradeStatus::Tick] before [UpgradeStatus::Length])
@@ -65,54 +66,43 @@ impl Directory {
 
 	#[async_recursion::async_recursion]
 	async fn upgrade_folder_to(&self, path: &std::path::Path, state: &mut UpgradeState, tx: Option<mpsc::Sender<UpgradeStatus>>) {
-		let mut fetch_set = std::collections::HashSet::new();
-		for remote_file in &self.files {
-			fetch_set.insert(remote_file);
-		}
+		let mut fetch_set = HashMap::<String, File>::new();
 		let mut files = tokio::fs::read_dir(path).await.expect("cannot open path");
 
-		match state.top_level {
-			false => {
-				while let Ok(Some(local_file)) = files.next_entry().await {
-					let local_file_type = local_file.file_type().await.unwrap();
-					if local_file_type.is_dir() {
-						match self.children.iter().find(|remote_child| {
-							remote_child.name == local_file.file_name().to_string_lossy()
-						}) {
-							Some(_) => {
-								// do nothing, local folder already exists
-							},
-							None => {
-								tokio::fs::remove_dir_all(local_file.path()).await.unwrap();
-							}
-						}
-					} else if local_file_type.is_file() {
-						let local_contents = tokio::fs::read(local_file.path()).await.unwrap();
-						let local_sha = Sha256::digest(local_contents);
-						match self.files.iter().find(|remote_file| {
-							remote_file.sha == format!("{:x}", local_sha) &&
-							remote_file.name == local_file.file_name().to_string_lossy()
-						}) {
-							Some(remote_file) => {
-								fetch_set.remove(remote_file);
-							},
-							None => {
-								tokio::fs::remove_file(local_file.path()).await.unwrap();
-							}
+		if state.top_level {
+			state.top_level = false;
+		} else {
+			while let Ok(Some(local_file)) = files.next_entry().await {
+				let local_file_type = local_file.file_type().await.unwrap();
+				let local_file_name = local_file.file_name();
+				let local_file_name = local_file_name.to_string_lossy();
+
+				if local_file_type.is_dir() {
+					if !self.children.contains_key(local_file_name.as_ref()) {
+						tokio::fs::remove_dir_all(local_file.path()).await.unwrap();
+					}
+				} else if local_file_type.is_file() {
+					let local_contents = tokio::fs::read(local_file.path()).await.unwrap();
+					let local_sha = tokio::task::spawn_blocking(move || {
+						format!("{:x}", Sha256::digest(local_contents))
+					}).await.unwrap();
+					match self.files.get(local_file_name.as_ref()).map(|remote_file| remote_file.sha == local_sha) {
+						Some(true) => {
+							fetch_set.remove(local_file_name.as_ref());
+						},
+						_ => {
+							tokio::fs::remove_file(local_file.path()).await.unwrap();
 						}
 					}
 				}
-			},
-			true => {
-				state.top_level = false;
 			}
 		}
 
-		for to_fetch in fetch_set.drain() {
-			let local_path = &path.join(&to_fetch.name);
+		for (name, to_fetch) in fetch_set.into_iter() {
+			let local_path = &path.join(&name);
 			let mut local_file = tokio::fs::File::create(local_path).await.unwrap();
-			let url = to_fetch.url.clone();
-			let sha = to_fetch.sha.clone();
+			let url = to_fetch.url;
+			let sha = to_fetch.sha;
 
 			let tx = tx.clone();
 
@@ -129,9 +119,15 @@ impl Directory {
 							}
 						}
 					}.bytes().await.unwrap();
+					let contents = Arc::new(contents);
 
-					let downloaded_sha = format!("{:x}", Sha256::digest(&contents));
-					if downloaded_sha != sha {
+					let downloaded_sha = {
+						let contents = contents.clone();
+						tokio::task::spawn_blocking(move || {
+							format!("{:x}", Sha256::digest(contents.as_ref()))
+						}).await.unwrap()
+					};
+					if downloaded_sha != *sha {
 						panic!("sha256 for {} didn't check out\nexpected {}\nfound {}", url, sha, downloaded_sha);
 					}
 
@@ -144,8 +140,8 @@ impl Directory {
 			state.handles.push(fetch_handle);
 		}
 
-		for child in &self.children {
-			let local_path = &path.join(&child.name);
+		for (name, child) in &self.children {
+			let local_path = &path.join(name);
 
 			if let Err(error) = tokio::fs::create_dir(local_path).await {
 				if error.kind() != std::io::ErrorKind::AlreadyExists {
@@ -161,7 +157,6 @@ impl Directory {
 /// Contains information about a remote file, part of a [Directory].
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash, Clone)]
 pub struct File {
-	pub name: String,
 	pub sha: String,
 	pub url: String
 }
