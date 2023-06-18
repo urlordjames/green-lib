@@ -14,7 +14,7 @@ struct UpgradeState {
 }
 
 /// Contains information about a remote directory, created from a manifest that can be fetched with [Directory::from_url].
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct Directory {
 	pub files: HashMap<String, File>,
 	pub children: HashMap<String, Directory>
