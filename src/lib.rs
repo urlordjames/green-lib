@@ -10,7 +10,8 @@ pub mod util;
 
 struct UpgradeState {
 	top_level: bool,
-	handles: Vec<JoinHandle<()>>
+	handles: Vec<JoinHandle<()>>,
+	tx: Option<mpsc::Sender<UpgradeStatus>>
 }
 
 /// Contains information about a remote directory, created from a manifest that can be fetched with [Directory::from_url].
@@ -53,11 +54,12 @@ impl Directory {
 	pub async fn upgrade_game_folder(&self, path: &std::path::Path, tx: Option<mpsc::Sender<UpgradeStatus>>) {
 		let mut upgrade_state = UpgradeState {
 			top_level: true,
-			handles: vec![]
+			handles: vec![],
+			tx
 		};
 
-		self.upgrade_folder_to(path, &mut upgrade_state, tx.clone()).await;
-		send!(tx, UpgradeStatus::Length(upgrade_state.handles.len()));
+		self.upgrade_folder_to(path, &mut upgrade_state).await;
+		send!(upgrade_state.tx, UpgradeStatus::Length(upgrade_state.handles.len()));
 
 		for handle in upgrade_state.handles.iter_mut() {
 			handle.await.unwrap();
@@ -65,7 +67,7 @@ impl Directory {
 	}
 
 	#[async_recursion::async_recursion]
-	async fn upgrade_folder_to(&self, path: &std::path::Path, state: &mut UpgradeState, tx: Option<mpsc::Sender<UpgradeStatus>>) {
+	async fn upgrade_folder_to(&self, path: &std::path::Path, state: &mut UpgradeState) {
 		let mut fetch_set = self.files.clone();
 		let mut files = tokio::fs::read_dir(path).await.expect("cannot open path");
 
@@ -104,7 +106,7 @@ impl Directory {
 			let url = to_fetch.url;
 			let sha = to_fetch.sha;
 
-			let tx = tx.clone();
+			let tx = state.tx.clone();
 
 			let fetch_handle = tokio::spawn(async move {
 				loop {
@@ -149,7 +151,7 @@ impl Directory {
 				}
 			}
 
-			child.upgrade_folder_to(local_path, state, tx.clone()).await;
+			child.upgrade_folder_to(local_path, state).await;
 		}
 	}
 }
