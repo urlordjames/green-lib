@@ -36,6 +36,8 @@ macro_rules! send {
 	}
 }
 
+const MAX_ATTEMPTS: u64 = 5;
+
 impl Directory {
 	/// # Description
 	/// Fetches a manifest from a URL.
@@ -109,15 +111,23 @@ impl Directory {
 			let tx = state.tx.clone();
 
 			let fetch_handle = tokio::spawn(async move {
+				let mut attempts = 0;
+
 				loop {
 					let contents = match reqwest::get(&url).await {
 						Ok(contents) => contents,
 						Err(reason) => {
 							if reason.is_request() {
-								tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+								attempts += 1;
+
+								if attempts > MAX_ATTEMPTS {
+									panic!("failed to download {url} after {MAX_ATTEMPTS} attempts");
+								}
+
+								tokio::time::sleep(tokio::time::Duration::from_millis(attempts * 250)).await;
 								continue;
 							} else {
-								panic!("{:?}", reason);
+								panic!("{reason:?}");
 							}
 						}
 					}.bytes().await.unwrap();
@@ -130,7 +140,7 @@ impl Directory {
 						}).await.unwrap()
 					};
 					if downloaded_sha != *sha {
-						panic!("sha256 for {} didn't check out\nexpected {}\nfound {}", url, sha, downloaded_sha);
+						panic!("sha256 for {url} didn't check out\nexpected {sha}\nfound {downloaded_sha}");
 					}
 
 					local_file.write_all(&contents).await.unwrap();
@@ -147,7 +157,7 @@ impl Directory {
 
 			if let Err(error) = tokio::fs::create_dir(local_path).await {
 				if error.kind() != std::io::ErrorKind::AlreadyExists {
-					panic!("cannot create folder {:?} because {}", local_path, error);
+					panic!("cannot create {local_path:?}: {error}");
 				}
 			}
 
