@@ -1,6 +1,6 @@
 [package]
 name = "green-lib"
-version = "0.6.3"
+version = "0.6.4"
 edition = "2021"
 authors = ["urlordjames <32751441+urlordjames@users.noreply.github.com>"]
 license = "MIT"
@@ -8,9 +8,9 @@ license = "MIT"
 [dependencies]
 serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
-tokio = { version = "1.37", features = [ "fs" ] }
+tokio = { version = "1.38", features = [ "fs" ] }
 sha2 = "0.10"
-async-recursion = "1.0"
+async-recursion = "1.1"
 
 [dependencies.reqwest]
 version = "0.12"
