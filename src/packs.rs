@@ -10,6 +10,7 @@ pub struct PacksListManifest {
 	pub featured_pack: Option<String>
 }
 
+#[derive(Debug)]
 pub enum FeaturedPackError {
 	Unspecified,
 	Invalid
