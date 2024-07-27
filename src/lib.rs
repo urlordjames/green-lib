@@ -6,6 +6,7 @@ use tokio::io::AsyncWriteExt;
 use std::sync::Arc;
 use std::collections::HashMap;
 
+pub mod packs;
 pub mod util;
 
 struct UpgradeState {
