@@ -3,11 +3,14 @@ use sha2::{Sha256, Digest};
 use tokio::task::JoinHandle;
 use tokio::sync::mpsc;
 use tokio::io::AsyncWriteExt;
+use once_cell::sync::Lazy;
 use std::sync::Arc;
 use std::collections::HashMap;
 
 pub mod packs;
 pub mod util;
+
+pub(crate) static CLIENT: Lazy<reqwest::Client> = Lazy::new(reqwest::Client::new);
 
 struct UpgradeState {
 	top_level: bool,
@@ -45,7 +48,7 @@ impl Directory {
 	/// # Warning
 	/// This function will trust any URL you stick into it, ideally make sure only trusted URLs are passed in, or at least ensure all URLs use encrypted protocols like HTTPS.
 	pub async fn from_url<U: reqwest::IntoUrl>(url: U) -> Option<Self> {
-		let resp = reqwest::get(url).await.ok()?.text().await.ok()?;
+		let resp = CLIENT.get(url).send().await.ok()?.text().await.ok()?;
 		serde_json::from_str(&resp).ok()
 	}
 
@@ -115,7 +118,7 @@ impl Directory {
 				let mut attempts = 0;
 
 				loop {
-					let contents = match reqwest::get(&url).await {
+					let contents = match CLIENT.get(&url).send().await {
 						Ok(contents) => contents,
 						Err(reason) => {
 							if reason.is_request() {

@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use sha2::{Sha256, Digest};
 use std::collections::HashMap;
-use crate::Directory;
+use crate::{CLIENT, Directory};
 
 /// Contains information about a set of [Directories](Directory).
 #[derive(Deserialize, Debug, Clone)]
@@ -22,7 +22,7 @@ impl PacksListManifest {
 	/// # Warning
 	/// This function will trust any URL you stick into it, ideally make sure only trusted URLs are passed in, or at least ensure all URLs use encrypted protocols like HTTPS.
 	pub async fn from_url<U: reqwest::IntoUrl>(url: U) -> Option<Self> {
-		let resp = reqwest::get(url).await.ok()?.text().await.ok()?;
+		let resp = CLIENT.get(url).send().await.ok()?.text().await.ok()?;
 		serde_json::from_str(&resp).ok()
 	}
 
@@ -48,7 +48,7 @@ impl ManifestMetadata {
 	/// The integrity of the returned [Directory] will be checked.
 	/// If the integrity check fails this function will return [None].
 	pub async fn to_directory(&self) -> Option<Directory> {
-		let resp = reqwest::get(&self.manifest_url).await.ok()?.text().await.ok()?;
+		let resp = CLIENT.get(&self.manifest_url).send().await.ok()?.text().await.ok()?;
 
 		if self.manifest_sha != format!("{:x}", Sha256::digest(&resp)) {
 			return None;
